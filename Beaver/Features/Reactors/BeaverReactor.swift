@@ -46,8 +46,9 @@ final class BeaverReactor: AsyncReactor {
         /// Replaces the PDFs in the list (images stay), e.g. for previews and tests.
         case setPDFs([PDFItem])
         case didDismissAlert
-        /// Stops the running export. Nothing is saved unless writing had already begun; a file
-        /// written before Cancel took effect is kept and gets the usual saved banner.
+        /// Stops the running export or import. An export saves nothing unless writing had
+        /// already begun; a file written before Cancel took effect is kept and gets the usual
+        /// saved banner. An import adds nothing and deletes the copies Beaver made for it.
         case cancelExport
         case didCancelRemoveAll
         case didChangeFileImporterPresented(Bool)
@@ -124,6 +125,8 @@ final class BeaverReactor: AsyncReactor {
 
     /// Long-running work in progress. While set, the list can't change and exports are ignored.
     enum Activity: Equatable {
+        /// Reading files being added: the file importer, a drop, picked photos or a scan.
+        case importing
         case merging
         case splitting
         case converting
@@ -133,6 +136,7 @@ final class BeaverReactor: AsyncReactor {
 
         var title: String {
             switch self {
+            case .importing: return DesignSystem.Progress.addingFiles
             case .merging: return DesignSystem.Progress.merging
             case .splitting: return DesignSystem.Progress.splitting
             case .converting: return DesignSystem.Progress.converting
@@ -230,6 +234,8 @@ final class BeaverReactor: AsyncReactor {
     private let securityScopedAccess = SecurityScopedAccess()
     /// The running export, kept so Cancel can stop it.
     private var exportTask: Task<ExportAlert, Never>?
+    /// The running import, kept so Cancel can stop it.
+    private var importTask: Task<[URL: LoadedImage], Never>?
 
     init(
         saveLocationProvider: SaveLocationProviding = PlatformSaveLocationService(),
@@ -307,6 +313,7 @@ final class BeaverReactor: AsyncReactor {
             state.exportAlert = nil
         case .cancelExport:
             exportTask?.cancel()
+            importTask?.cancel()
         case .didCancelRemoveAll:
             state.isConfirmingRemoveAll = false
         case .didChangeFileImporterPresented(let isPresented):
@@ -494,7 +501,20 @@ final class BeaverReactor: AsyncReactor {
         guard !candidates.isEmpty else { return }
 
         let imageURLs = DroppedFileKind.image.filter(candidates)
-        let loaded = await Self.loadImages(imageURLs, using: imageService)
+        state.activity = .importing
+        let imageService = imageService
+        let task = Task { await Self.loadImages(imageURLs, using: imageService) }
+        importTask = task
+        let loaded = await task.value
+        importTask = nil
+        state.activity = nil
+
+        // Cancel adds nothing and says nothing; copies made only for this import go too.
+        if task.isCancelled {
+            let reachable = Set(([state.items] + state.history.snapshots).flatMap { $0.map(\.url) })
+            ImportedFileStorage.discard(candidates.filter { !reachable.contains($0) })
+            return
+        }
 
         // The list may have changed while images were loading.
         var current = Set(state.items.map(\.url))
@@ -531,20 +551,21 @@ final class BeaverReactor: AsyncReactor {
         let pixelSize: CGSize?
     }
 
+    /// Stops between images when the task is cancelled.
     @concurrent
     private nonisolated static func loadImages(
         _ urls: [URL],
         using imageService: any ImageServiceProtocol
     ) async -> [URL: LoadedImage] {
-        Dictionary(
-            urls.map { url in
-                (url, LoadedImage(
-                    thumbnail: imageService.thumbnail(for: url, maxPixelSize: thumbnailMaxPixelSize),
-                    pixelSize: imageService.pixelSize(for: url)
-                ))
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
+        var loaded: [URL: LoadedImage] = [:]
+        for url in urls where loaded[url] == nil {
+            if Task.isCancelled { break }
+            loaded[url] = LoadedImage(
+                thumbnail: imageService.thumbnail(for: url, maxPixelSize: thumbnailMaxPixelSize),
+                pixelSize: imageService.pixelSize(for: url)
+            )
+        }
+        return loaded
     }
 
     /// Twice the largest card (320 pt) plus some room, so previews stay sharp on Retina.

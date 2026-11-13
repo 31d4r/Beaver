@@ -54,8 +54,17 @@ final class MockImageService: ImageServiceProtocol, @unchecked Sendable {
     var convertedDocument: PDFDocument?
     private(set) var convertedRotations: [[RotationAngle]] = []
 
+    /// Holds each thumbnail until the asking task is cancelled (at most 5 s), like a slow file.
+    var blocksUntilCancelled = false
+
     func thumbnail(for url: URL, maxPixelSize: Int) -> CGImage? {
-        thumbnailsByURL[url]
+        if blocksUntilCancelled {
+            let deadline = Date().addingTimeInterval(5)
+            while !Task.isCancelled && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.001)
+            }
+        }
+        return thumbnailsByURL[url]
     }
 
     func convertImagesToPDF(imageUrls: [URL], rotations: [RotationAngle]) -> ImageConversionResult {
