@@ -76,6 +76,53 @@ struct ExportCancellationTests {
         #expect(files.isEmpty)
     }
 
+    @Test func cancelDuringSplitRemovesThePagesAlreadyWritten() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileIO = CancellingFileIOService()
+        let service = ExportService(writer: PDFFileWriterService(fileIOService: fileIO))
+
+        let alert = await Task {
+            await service.splitPDFs(urls: [TestFixtures.samplePDF, TestFixtures.sample2PDF], rotations: [], into: directory)
+        }.value
+
+        #expect(alert == .cancelled)
+        #expect(fileIO.writeCount == 1)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    @Test func cancelDuringPageImagesRemovesTheImagesAlreadyWritten() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileIO = CancellingFileIOService()
+        let service = ExportService(fileIOService: fileIO)
+        let sources = [TestFixtures.samplePDF, TestFixtures.sample2PDF].map { PageExportSource(url: $0) }
+
+        let alert = await Task {
+            await service.exportPageImages(sources, as: .png, into: directory)
+        }.value
+
+        #expect(alert == .cancelled)
+        #expect(fileIO.writeCount == 1)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    @Test func cancelledWriterStopsBetweenPagesAndListsWhatItWrote() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pages = PDFService().splitPDF(urls: [TestFixtures.samplePDF, TestFixtures.sample2PDF], rotations: []).pages
+        try #require(pages.count > 1)
+
+        let (successCount, savedURLs) = await Task {
+            let result = PDFFileWriterService(fileIOService: CancellingFileIOService()).savePDFDocuments(pages, to: directory)
+            return (result.successCount, result.savedURLs)
+        }.value
+
+        #expect(successCount == 1)
+        #expect(savedURLs.count == 1)
+        #expect(savedURLs.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    }
+
     @Test func mergeReportsTheSavedFile() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -121,5 +168,24 @@ struct ExportCancellationTests {
 
         #expect(!alert.isSuccess)
         #expect(alert.output == nil)
+    }
+}
+
+/// Writes for real, then cancels the task that asked, as if Cancel arrived after the first file.
+private final class CancellingFileIOService: FileIOServiceProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var writes = 0
+    private let fileIO = FileIOService()
+
+    var writeCount: Int { lock.withLock { writes } }
+
+    func write(data: Data, to url: URL) throws {
+        try fileIO.write(data: data, to: url)
+        lock.withLock { writes += 1 }
+        withUnsafeCurrentTask { $0?.cancel() }
+    }
+
+    func fileExists(at url: URL) -> Bool {
+        fileIO.fileExists(at: url)
     }
 }

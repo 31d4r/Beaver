@@ -37,14 +37,18 @@ public struct PDFFileWriterService: PDFFileWriterServiceProtocol {
         var failureCount = 0
         var errors: [Error] = []
         var usedNames: Set<String> = []
+        var savedURLs: [URL] = []
 
+        // Stops between pages when the task is cancelled; `savedURLs` says what to clean up.
         for page in pages {
+            if Task.isCancelled { break }
             let fileURL = uniqueURL(for: page.fileName, in: directory, excluding: usedNames)
             usedNames.insert(fileURL.lastPathComponent)
 
             do {
                 try savePDFDocument(page.document, to: fileURL)
                 successCount += 1
+                savedURLs.append(fileURL)
             } catch {
                 failureCount += 1
                 errors.append(error)
@@ -54,7 +58,8 @@ public struct PDFFileWriterService: PDFFileWriterServiceProtocol {
         return SaveResult(
             successCount: successCount,
             failureCount: failureCount,
-            errors: errors
+            errors: errors,
+            savedURLs: savedURLs
         )
     }
 
@@ -86,11 +91,14 @@ public struct SaveResult: Equatable {
     public let successCount: Int
     public let failureCount: Int
     public let errors: [Error]
+    /// The files written, in order, so a cancelled save can remove them.
+    public let savedURLs: [URL]
 
-    public init(successCount: Int, failureCount: Int, errors: [Error]) {
+    public init(successCount: Int, failureCount: Int, errors: [Error], savedURLs: [URL] = []) {
         self.successCount = successCount
         self.failureCount = failureCount
         self.errors = errors
+        self.savedURLs = savedURLs
     }
 
     public var isCompleteSuccess: Bool {

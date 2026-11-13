@@ -191,6 +191,51 @@ struct ScanReactorTests {
         #expect(!reactor.state.canEdit)
     }
 
+    @Test func cancellingTheSaveKeepsThePagesRemovesThePartialPDFAndShowsNoError() async throws {
+        let output = directory.appendingPathComponent("out", isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = output.appendingPathComponent("Scan.pdf")
+        saveLocation.saveURL = destination
+        // Leaves a partial file, then waits until the save is cancelled.
+        let reactor = ScanReactor(
+            builder: ScanDocumentBuilder(directory: directory),
+            saveLocationProvider: saveLocation,
+            date: Date(timeIntervalSince1970: 0),
+            writePDF: { _, url, _ in
+                try Data("partial".utf8).write(to: url)
+                try await Task.sleep(for: .seconds(60))
+            }
+        )
+        await reactor.action(.addCaptures([page(), page()]))
+
+        let running = Task { await reactor.action(.save) }
+        while reactor.state.activity != .saving {
+            await Task.yield()
+        }
+        reactor.action(.cancelSave)
+        await running.value
+
+        #expect(reactor.state.activity == nil)
+        #expect(reactor.state.errorMessage == nil)
+        #expect(reactor.state.savedURL == nil)
+        #expect(reactor.state.pages.count == 2)
+        #expect(reactor.state.canSave)
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    @Test func cancelWithoutASaveDoesNothing() async {
+        let reactor = makeReactor()
+        await reactor.action(.addCaptures([page()]))
+
+        reactor.action(.cancelSave)
+
+        #expect(reactor.state.activity == nil)
+        #expect(reactor.state.errorMessage == nil)
+        #expect(reactor.state.pages.count == 1)
+        reactor.action(.discard)
+    }
+
     @Test func aFailedSaveKeepsThePages() async {
         saveLocation.saveURL = URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)/Scan.pdf")
         let reactor = makeReactor()

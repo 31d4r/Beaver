@@ -65,5 +65,14 @@ enum PhotoLibraryImporter {
         }
         return Result(urls: urls, failedCount: failedCount)
     }
+
+    /// Deletes copies made by `load` that won't be added, each with the folder `ImportedFile` made for it.
+    static func discard(_ urls: [URL]) {
+        for url in urls {
+            let folder = url.deletingLastPathComponent()
+            let isOwnFolder = folder.deletingLastPathComponent().standardizedFileURL == ImportedFile.directory.standardizedFileURL
+            try? FileManager.default.removeItem(at: isOwnFolder ? folder : url)
+        }
+    }
 }
 #endif
