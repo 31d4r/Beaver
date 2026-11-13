@@ -18,9 +18,7 @@ struct ImportedFile: Transferable {
     }
 
     /// Where imported files live while they are in the list. iOS empties it between launches.
-    static var directory: URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("Imported", isDirectory: true)
-    }
+    static var directory: URL { ImportedFileStorage.directory }
 
     /// Copies `file` into its own folder, keeping its name so the card shows it, and adds the
     /// right extension when the sender left it off.
@@ -64,6 +62,11 @@ enum PhotoLibraryImporter {
             }
         }
         return Result(urls: urls, failedCount: failedCount)
+    }
+
+    /// Deletes copies made by `load` that won't be added, each with the folder `ImportedFile` made for it.
+    static func discard(_ urls: [URL]) {
+        ImportedFileStorage.discard(urls)
     }
 }
 #endif

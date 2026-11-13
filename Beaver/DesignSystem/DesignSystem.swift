@@ -656,6 +656,15 @@ enum DesignSystem {
         static var combining: String { String(localized: "Creating PDF…") }
         static var exportingImages: String { String(localized: "progress.exportingImages", defaultValue: "Saving pages as images…") }
         static var exportingPages: String { String(localized: "progress.exportingPages", defaultValue: "Saving pages…") }
+        static var addingFiles: String {
+            String(localized: "progress.addingFiles", defaultValue: "Adding Files…", comment: "Progress card while picked, dropped or scanned files are read")
+        }
+        static var cancelHint: String {
+            String(localized: "progress.cancel.hint", defaultValue: "Stops the work in progress", comment: "Accessibility hint for Cancel on the progress card")
+        }
+        static var cancelled: String {
+            String(localized: "progress.cancelled", defaultValue: "Cancelled", comment: "VoiceOver announcement after Cancel on the progress card")
+        }
     }
 
     enum Confirmations {

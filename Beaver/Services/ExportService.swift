@@ -52,6 +52,7 @@ struct ExportService: ExportServiceProtocol {
     @concurrent
     func mergePDFs(urls: [URL], rotations: [PDFRotation], to destination: URL) async -> ExportAlert {
         let result = pdfService.mergePDFs(urls: urls, rotations: rotations)
+        guard !Task.isCancelled else { return .cancelled }
 
         guard let document = result.document else {
             return ExportAlert(
@@ -62,8 +63,6 @@ struct ExportService: ExportServiceProtocol {
                 isSuccess: false
             )
         }
-
-        guard !Task.isCancelled else { return .cancelled }
 
         do {
             try writer.savePDFDocument(document, to: destination)
@@ -86,6 +85,7 @@ struct ExportService: ExportServiceProtocol {
     @concurrent
     func splitPDFs(urls: [URL], rotations: [PDFRotation], into directory: URL) async -> ExportAlert {
         let result = pdfService.splitPDF(urls: urls, rotations: rotations)
+        guard !Task.isCancelled else { return .cancelled }
 
         guard !result.pages.isEmpty else {
             return ExportAlert(
@@ -97,9 +97,11 @@ struct ExportService: ExportServiceProtocol {
             )
         }
 
-        guard !Task.isCancelled else { return .cancelled }
-
         let saveResult = writer.savePDFDocuments(result.pages, to: directory)
+        if Task.isCancelled {
+            Self.discard(saveResult.savedURLs)
+            return .cancelled
+        }
         return ExportAlert(
             message: DesignSystem.Alerts.message(
                 DesignSystem.Alerts.message(for: saveResult),
@@ -122,6 +124,7 @@ struct ExportService: ExportServiceProtocol {
             rotations: rotations,
             recognizeText: recognizeText
         )
+        guard !Task.isCancelled else { return .cancelled }
 
         guard let document = result.document else {
             return ExportAlert(
@@ -132,8 +135,6 @@ struct ExportService: ExportServiceProtocol {
                 isSuccess: false
             )
         }
-
-        guard !Task.isCancelled else { return .cancelled }
 
         do {
             try writer.savePDFDocument(document, to: destination)
@@ -156,6 +157,7 @@ struct ExportService: ExportServiceProtocol {
     @concurrent
     func combine(sources: [ExportSource], to destination: URL) async -> ExportAlert {
         let result = composer.combine(sources)
+        guard !Task.isCancelled else { return .cancelled }
 
         guard let document = result.document else {
             return ExportAlert(
@@ -166,8 +168,6 @@ struct ExportService: ExportServiceProtocol {
                 isSuccess: false
             )
         }
-
-        guard !Task.isCancelled else { return .cancelled }
 
         do {
             try writer.savePDFDocument(document, to: destination)
@@ -190,6 +190,7 @@ struct ExportService: ExportServiceProtocol {
     @concurrent
     func split(sources: [ExportSource], into directory: URL) async -> ExportAlert {
         let result = composer.split(sources)
+        guard !Task.isCancelled else { return .cancelled }
 
         guard !result.pages.isEmpty else {
             return ExportAlert(
@@ -201,9 +202,11 @@ struct ExportService: ExportServiceProtocol {
             )
         }
 
-        guard !Task.isCancelled else { return .cancelled }
-
         let saveResult = writer.savePDFDocuments(result.pages, to: directory)
+        if Task.isCancelled {
+            Self.discard(saveResult.savedURLs)
+            return .cancelled
+        }
         return ExportAlert(
             message: DesignSystem.Alerts.message(
                 DesignSystem.Alerts.message(for: saveResult),
@@ -212,6 +215,13 @@ struct ExportService: ExportServiceProtocol {
             isSuccess: !saveResult.isCompleteFailure,
             output: saveResult.isCompleteFailure ? nil : directory
         )
+    }
+
+    /// Removes what a cancelled export already wrote.
+    private static func discard(_ urls: [URL]) {
+        for url in urls {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     // MARK: - Pages
@@ -290,7 +300,11 @@ struct ExportService: ExportServiceProtocol {
             }
         }
 
-        if Task.isCancelled && saved.isEmpty { return .cancelled }
+        // Cancel keeps nothing: pages saved before it are removed again.
+        if Task.isCancelled {
+            Self.discard(saved)
+            return .cancelled
+        }
 
         guard !saved.isEmpty else {
             let message = failureCount == 0

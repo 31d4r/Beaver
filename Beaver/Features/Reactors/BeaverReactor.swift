@@ -1,6 +1,7 @@
 import BeaverCore
 import CoreGraphics
 import AsyncReactor
+import OSLog
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -46,10 +47,17 @@ final class BeaverReactor: AsyncReactor {
         /// Replaces the PDFs in the list (images stay), e.g. for previews and tests.
         case setPDFs([PDFItem])
         case didDismissAlert
-        /// Stops the running export. Nothing is saved unless writing had already begun.
+        /// Stops the running export or import. An export saves nothing unless writing had
+        /// already begun; a file written before Cancel took effect is kept and gets the usual
+        /// saved banner. An import adds nothing and deletes the copies Beaver made for it.
         case cancelExport
         case didCancelRemoveAll
+        /// The file importer opened or closed. When it closes after files were picked but
+        /// before it hands them over (it may still be downloading them), the import already
+        /// shows as busy.
         case didChangeFileImporterPresented(Bool)
+        /// The person closed the file importer without picking anything.
+        case didCancelFileImport
 
         case select(UUID, SelectionModifier)
         case selectAll
@@ -123,6 +131,8 @@ final class BeaverReactor: AsyncReactor {
 
     /// Long-running work in progress. While set, the list can't change and exports are ignored.
     enum Activity: Equatable {
+        /// Reading files being added: the file importer, a drop, picked photos or a scan.
+        case importing
         case merging
         case splitting
         case converting
@@ -132,6 +142,7 @@ final class BeaverReactor: AsyncReactor {
 
         var title: String {
             switch self {
+            case .importing: return DesignSystem.Progress.addingFiles
             case .merging: return DesignSystem.Progress.merging
             case .splitting: return DesignSystem.Progress.splitting
             case .converting: return DesignSystem.Progress.converting
@@ -151,6 +162,8 @@ final class BeaverReactor: AsyncReactor {
         /// What the file importer is for. Kept after dismissal so a late completion still applies.
         var fileImport: FileImportRequest?
         var isFileImporterPresented = false
+        /// The file importer closed and the import shows as busy, but its files haven't arrived yet.
+        var isAwaitingImportedFiles = false
         var history = UndoHistory<[WorkspaceItem], Edit>()
         /// The PDF whose page view is open.
         var pagesPDFID: UUID?
@@ -229,6 +242,12 @@ final class BeaverReactor: AsyncReactor {
     private let securityScopedAccess = SecurityScopedAccess()
     /// The running export, kept so Cancel can stop it.
     private var exportTask: Task<ExportAlert, Never>?
+    /// The running import, kept so Cancel can stop it.
+    private var importTask: Task<[URL: LoadedImage], Never>?
+    /// When the file importer closed with files picked, to log how long they took to arrive.
+    private var importerClosedAt: ContinuousClock.Instant?
+    /// Timings only, never file names: where an import spends its time on a device.
+    private static let importLog = Logger(subsystem: "com.eldartutnjic.PDFHub", category: "Import")
 
     init(
         saveLocationProvider: SaveLocationProviding = PlatformSaveLocationService(),
@@ -284,6 +303,7 @@ final class BeaverReactor: AsyncReactor {
         case .didImportFiles(let urls):
             await completeFileImport(urls)
         case .didFailFileImport(let message):
+            endAwaitingImportedFiles()
             state.fileImport = nil
             state.isFileImporterPresented = false
             state.exportAlert = ExportAlert(message: message, isSuccess: false)
@@ -306,10 +326,28 @@ final class BeaverReactor: AsyncReactor {
             state.exportAlert = nil
         case .cancelExport:
             exportTask?.cancel()
+            importTask?.cancel()
+            if state.isAwaitingImportedFiles {
+                importerClosedAt = nil
+                // Files that arrive later are ignored: `completeFileImport` needs `fileImport`.
+                endAwaitingImportedFiles()
+                state.fileImport = nil
+            }
         case .didCancelRemoveAll:
             state.isConfirmingRemoveAll = false
         case .didChangeFileImporterPresented(let isPresented):
             state.isFileImporterPresented = isPresented
+            if !isPresented, state.fileImport == .files, state.activity == nil {
+                state.activity = .importing
+                state.isAwaitingImportedFiles = true
+                importerClosedAt = .now
+                Self.importLog.notice("File importer closed; waiting for its files")
+            }
+        case .didCancelFileImport:
+            importerClosedAt = nil
+            endAwaitingImportedFiles()
+            state.fileImport = nil
+            state.isFileImporterPresented = false
         case .select(let id, let modifier):
             select(id, modifier)
         case .selectAll:
@@ -471,6 +509,13 @@ final class BeaverReactor: AsyncReactor {
     }
 
     private func completeFileImport(_ urls: [URL]) async {
+        // Hands the busy state over to `addFiles`, which takes it again before it awaits
+        // anything, so the progress card stays up without a gap.
+        endAwaitingImportedFiles()
+        if let closedAt = importerClosedAt {
+            importerClosedAt = nil
+            Self.importLog.notice("File importer handed over \(urls.count, privacy: .public) files \(Self.milliseconds(since: closedAt), privacy: .public) ms after closing")
+        }
         guard let request = state.fileImport else { return }
         state.fileImport = nil
         state.isFileImporterPresented = false
@@ -493,7 +538,23 @@ final class BeaverReactor: AsyncReactor {
         guard !candidates.isEmpty else { return }
 
         let imageURLs = DroppedFileKind.image.filter(candidates)
-        let loaded = await Self.loadImages(imageURLs, using: imageService)
+        state.activity = .importing
+        let imageService = imageService
+        let pdfURLs = DroppedFileKind.pdf.filter(candidates)
+        let readStart = ContinuousClock.now
+        let task = Task { await Self.readFiles(images: imageURLs, pdfs: pdfURLs, using: imageService) }
+        importTask = task
+        let loaded = await task.value
+        importTask = nil
+        state.activity = nil
+        Self.importLog.notice("Read \(candidates.count, privacy: .public) files in \(Self.milliseconds(since: readStart), privacy: .public) ms, cancelled: \(task.isCancelled, privacy: .public)")
+
+        // Cancel adds nothing and says nothing; copies made only for this import go too.
+        if task.isCancelled {
+            let reachable = Set(([state.items] + state.history.snapshots).flatMap { $0.map(\.url) })
+            ImportedFileStorage.discard(candidates.filter { !reachable.contains($0) })
+            return
+        }
 
         // The list may have changed while images were loading.
         var current = Set(state.items.map(\.url))
@@ -530,20 +591,53 @@ final class BeaverReactor: AsyncReactor {
         let pixelSize: CGSize?
     }
 
+    private static func milliseconds(since start: ContinuousClock.Instant) -> Int {
+        let elapsed = ContinuousClock.now - start
+        return Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+    }
+
+    /// Ends the busy state shown while the file importer was handing over its files.
+    private func endAwaitingImportedFiles() {
+        guard state.isAwaitingImportedFiles else { return }
+        state.isAwaitingImportedFiles = false
+        if state.activity == .importing {
+            state.activity = nil
+        }
+    }
+
+    /// Reads every new file off the main actor, stopping between files when cancelled:
+    /// thumbnails for images, and each PDF's first page and page count into the grid's
+    /// preview cache. Reading is what makes the system fetch a file that isn't on the device
+    /// yet, so the progress card covers that wait and the cards appear ready.
+    @concurrent
+    private nonisolated static func readFiles(
+        images: [URL],
+        pdfs: [URL],
+        using imageService: any ImageServiceProtocol
+    ) async -> [URL: LoadedImage] {
+        let loaded = await loadImages(images, using: imageService)
+        for url in pdfs {
+            if Task.isCancelled { break }
+            _ = await Previews.cache.preview(for: url, maxPixelSize: DesignSystem.Layout.previewPixelSize)
+        }
+        return loaded
+    }
+
+    /// Stops between images when the task is cancelled.
     @concurrent
     private nonisolated static func loadImages(
         _ urls: [URL],
         using imageService: any ImageServiceProtocol
     ) async -> [URL: LoadedImage] {
-        Dictionary(
-            urls.map { url in
-                (url, LoadedImage(
-                    thumbnail: imageService.thumbnail(for: url, maxPixelSize: thumbnailMaxPixelSize),
-                    pixelSize: imageService.pixelSize(for: url)
-                ))
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
+        var loaded: [URL: LoadedImage] = [:]
+        for url in urls where loaded[url] == nil {
+            if Task.isCancelled { break }
+            loaded[url] = LoadedImage(
+                thumbnail: imageService.thumbnail(for: url, maxPixelSize: thumbnailMaxPixelSize),
+                pixelSize: imageService.pixelSize(for: url)
+            )
+        }
+        return loaded
     }
 
     /// Twice the largest card (320 pt) plus some room, so previews stay sharp on Retina.
@@ -552,6 +646,8 @@ final class BeaverReactor: AsyncReactor {
     // MARK: - Export
 
     /// Runs `work` off the main actor with `activity` shown, then presents its result.
+    /// After Cancel, a failure or `.cancelled` shows nothing, but a success means the output
+    /// was already written before Cancel took effect, so it is kept and reported as saved.
     private func runExport(
         _ activity: Activity,
         _ work: @escaping @Sendable () async -> ExportAlert
@@ -563,7 +659,7 @@ final class BeaverReactor: AsyncReactor {
         let alert = await task.value
         exportTask = nil
         state.activity = nil
-        state.exportAlert = task.isCancelled ? nil : alert
+        state.exportAlert = task.isCancelled && !alert.isSuccess ? nil : alert
     }
 
     private func perform(_ action: DocumentAction, ids: Set<UUID>?) async {

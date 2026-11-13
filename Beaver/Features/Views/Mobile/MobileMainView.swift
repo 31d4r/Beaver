@@ -76,6 +76,7 @@ struct MobileMainView: View {
                 .animation(reduceMotion ? nil : .snappy, value: state.exportAlert)
                 .animation(reduceMotion ? nil : .snappy, value: photoImport != nil)
         }
+        .overlay { progressOverlay }
         .photosPicker(
             isPresented: $isPhotoPickerPresented,
             selection: $photoSelection,
@@ -119,15 +120,17 @@ struct MobileMainView: View {
         .fileImporter(
             isPresented: $isFileImporterPresented,
             allowedContentTypes: state.fileImport?.allowedContentTypes ?? [],
-            allowsMultipleSelection: state.fileImport?.allowsMultipleSelection ?? false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                reactor.send(.didImportFiles(urls))
-            case .failure(let error):
-                reactor.send(.didFailFileImport(error.localizedDescription))
-            }
-        }
+            allowsMultipleSelection: state.fileImport?.allowsMultipleSelection ?? false,
+            onCompletion: { result in
+                switch result {
+                case .success(let urls):
+                    reactor.send(.didImportFiles(urls))
+                case .failure(let error):
+                    reactor.send(.didFailFileImport(error.localizedDescription))
+                }
+            },
+            onCancellation: { reactor.action(.didCancelFileImport) }
+        )
         .modifier(FileDialogConfirmationLabel(label: state.fileImport?.confirmationLabel))
         .focusedSceneObject(reactor)
         .task {
@@ -193,21 +196,26 @@ struct MobileMainView: View {
         }
     }
 
-    /// Export progress, or what to do with the new PDF.
+    /// Centered progress over the whole screen while photos load or an export runs. Both
+    /// stop on Cancel: photo loading between photos, exports before anything is kept.
     @ViewBuilder
-    private var statusBar: some View {
+    private var progressOverlay: some View {
         if photoImport != nil {
-            ActivityBar(title: DesignSystem.Mobile.addingPhotos) {
+            ProgressOverlay(title: DesignSystem.Mobile.addingPhotos) {
                 photoImport?.cancel()
                 photoImport = nil
             }
-            .transition(barTransition)
         } else if let activity = state.activity {
-            ActivityBar(title: activity.title) {
+            ProgressOverlay(title: activity.title) {
                 reactor.action(.cancelExport)
             }
-            .transition(barTransition)
-        } else if let alert = state.exportAlert, alert.isSuccess {
+        }
+    }
+
+    /// What to do with the new PDF.
+    @ViewBuilder
+    private var statusBar: some View {
+        if state.activity == nil, photoImport == nil, let alert = state.exportAlert, alert.isSuccess {
             ExportBanner(
                 alert: alert,
                 onAddToWorkspace: state.exportToAdd.map { _ in
@@ -238,7 +246,11 @@ struct MobileMainView: View {
         photoImport?.cancel()
         photoImport = Task {
             let result = await PhotoLibraryImporter.load(items)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                // Photos copied in before Cancel never reach the list.
+                PhotoLibraryImporter.discard(result.urls)
+                return
+            }
             photoImport = nil
             if !result.urls.isEmpty {
                 reactor.send(.addFiles(result.urls))

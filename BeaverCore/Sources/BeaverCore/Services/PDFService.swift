@@ -79,6 +79,7 @@ public struct PDFService: PDFServiceProtocol {
         var skippedURLs: [URL] = []
 
         for (index, url) in urls.enumerated() {
+            if Task.isCancelled { break }
             guard let pdf = loadPDF(from: url) else {
                 skippedURLs.append(url)
                 continue
@@ -98,6 +99,7 @@ public struct PDFService: PDFServiceProtocol {
         var skippedURLs: [URL] = []
 
         for (index, url) in urls.enumerated() {
+            if Task.isCancelled { break }
             guard let pdf = loadPDF(from: url) else {
                 skippedURLs.append(url)
                 continue
@@ -121,6 +123,7 @@ public struct PDFService: PDFServiceProtocol {
 
     private func addPages(from sourcePDF: PDFDocument, to targetPDF: PDFDocument, withRotation rotation: PDFRotation) {
         for pageIndex in 0..<sourcePDF.pageCount {
+            if Task.isCancelled { return }
             guard let page = copiedPage(at: pageIndex, of: sourcePDF, addingRotation: rotation) else { continue }
             targetPDF.insert(page, at: targetPDF.pageCount)
         }
@@ -130,6 +133,7 @@ public struct PDFService: PDFServiceProtocol {
         var singlePagePDFs: [PDFDocument] = []
 
         for pageIndex in 0..<pdf.pageCount {
+            if Task.isCancelled { break }
             guard let page = copiedPage(at: pageIndex, of: pdf, addingRotation: rotation) else { continue }
 
             let singlePagePDF = PDFDocument()

@@ -92,7 +92,8 @@ public struct ImageService: ImageServiceProtocol {
         // One RecognizedText per readable page, in the same order convertSync draws them.
         var texts: [RecognizedText?] = []
         for (index, imageUrl) in imageUrls.enumerated() {
-            try? Task.checkCancellation()
+            // A cancelled conversion makes nothing; the caller reports the cancellation.
+            if Task.isCancelled { return ImageConversionResult(document: nil, skippedURLs: []) }
             guard let page = fullSizePage(for: imageUrl) else { continue }
             let rotation = rotations.indices.contains(index) ? rotations[index] : .zero
             let imageForOCR = Self.rotatedPixelImage(page.image, by: rotation) ?? page.image

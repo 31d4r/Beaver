@@ -16,6 +16,13 @@ struct WorkspaceCardActions {
     /// The files the commands work on.
     var targets: Set<UUID> { isSelected ? state.selection.ids : [item.id] }
 
+    /// The PDFs Share sends, in list order: the PDFs among the targets when the card is a PDF,
+    /// and nothing for an image card, so Share appears on PDF cards only.
+    var shareURLs: [URL] {
+        guard item.kind == .pdf else { return [] }
+        return state.targets(for: targets).filter { $0.kind == .pdf }.map(\.url)
+    }
+
     /// Show Pages, Quick Look, Rotate, then Merge, Split, Convert and Combine where they apply.
     var leading: [CardAction] {
         var actions: [CardAction] = []

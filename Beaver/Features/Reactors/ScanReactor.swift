@@ -39,7 +39,13 @@ final class ScanReactor: AsyncReactor {
         /// Shows a problem found outside the reactor, such as photos that didn't load.
         case showError(String)
         case didDismissError
+        /// Stops a running save. The partly written PDF is removed and no error is shown.
+        case cancelSave
     }
+
+    /// Writes reviewed pages as one PDF at a URL, with or without a searchable text layer.
+    /// Throws when it fails or the task is cancelled. Tests swap it to control timing.
+    typealias PDFWriter = @Sendable (_ pages: [ScanPage], _ url: URL, _ recognizeText: Bool) async throws -> Void
 
     enum Activity: Equatable {
         case preparing
@@ -78,13 +84,20 @@ final class ScanReactor: AsyncReactor {
     private let builder: ScanDocumentBuilder
     private let saveLocationProvider: SaveLocationProviding
     private let defaultName: String
+    private let writePDF: PDFWriter
+    /// The running save, kept so Cancel can stop it.
+    private var saveTask: Task<Bool, Never>?
 
     init(
         builder: ScanDocumentBuilder = ScanDocumentBuilder(),
         saveLocationProvider: SaveLocationProviding = PlatformSaveLocationService(),
-        date: Date = .now
+        date: Date = .now,
+        writePDF: PDFWriter? = nil
     ) {
         self.builder = builder
+        self.writePDF = writePDF ?? { pages, url, recognizeText in
+            try await builder.writePDF(pages, to: url, recognizeText: recognizeText)
+        }
         self.saveLocationProvider = saveLocationProvider
         self.defaultName = ScanFileName.make(prefix: DesignSystem.Scan.namePrefix, date: date)
         self.state = State(name: defaultName, makeTextSearchable: TextSearchablePreference.isEnabled)
@@ -143,6 +156,8 @@ final class ScanReactor: AsyncReactor {
             state.errorMessage = message
         case .didDismissError:
             state.errorMessage = nil
+        case .cancelSave:
+            saveTask?.cancel()
         }
     }
 
@@ -235,12 +250,16 @@ final class ScanReactor: AsyncReactor {
         state.activity = .saving
         let pages = state.pages
         let recognizeText = state.makeTextSearchable
-        let isWritten = await Self.write(pages, to: url, recognizeText: recognizeText, using: builder)
+        let writePDF = writePDF
+        let task = Task { await Self.write(pages, to: url, recognizeText: recognizeText, using: writePDF) }
+        saveTask = task
+        let isWritten = await task.value
+        saveTask = nil
         state.activity = nil
         if isWritten {
             builder.discard(pages)
             state.savedURL = url
-        } else {
+        } else if !task.isCancelled {
             state.errorMessage = DesignSystem.Scan.saveFailed
         }
     }
@@ -250,10 +269,10 @@ final class ScanReactor: AsyncReactor {
         _ pages: [ScanPage],
         to url: URL,
         recognizeText: Bool,
-        using builder: ScanDocumentBuilder
+        using writePDF: PDFWriter
     ) async -> Bool {
         do {
-            try await builder.writePDF(pages, to: url, recognizeText: recognizeText)
+            try await writePDF(pages, url, recognizeText)
             return true
         } catch {
             try? FileManager.default.removeItem(at: url)

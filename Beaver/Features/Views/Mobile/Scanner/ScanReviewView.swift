@@ -37,9 +37,9 @@ struct ScanReviewView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .navigationBarBackButtonHidden()
                 .toolbar { toolbar }
-                .overlay { progress }
                 .animation(reduceMotion ? nil : .snappy, value: state.pages.map(\.id))
         }
+        .overlay { progress }
         .accessibilityIdentifier(UITestID.scanReview)
         .interactiveDismissDisabled(state.needsDiscardConfirmation)
         .alert(DesignSystem.Scan.renameTitle, isPresented: $isRenamePresented) {
@@ -259,13 +259,13 @@ struct ScanReviewView: View {
 
     @ViewBuilder
     private var progress: some View {
-        if isBusy {
-            ProgressView {
-                Text(state.activity == .saving ? DesignSystem.Scan.saving : DesignSystem.Scan.preparing)
+        // Only saving stops on Cancel; preparing pages and loading photos run to the end.
+        if state.activity == .saving {
+            ProgressOverlay(title: DesignSystem.Scan.saving) {
+                reactor.action(.cancelSave)
             }
-            .padding(DesignSystem.Spacing.large)
-            .background(.regularMaterial, in: .rect(cornerRadius: 16, style: .continuous))
-            .transition(.opacity)
+        } else if isBusy {
+            ProgressOverlay(title: DesignSystem.Scan.preparing)
         }
     }
 
