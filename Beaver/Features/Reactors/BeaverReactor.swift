@@ -713,6 +713,13 @@ final class BeaverReactor: AsyncReactor {
         case .split, .exportPNG, .exportJPEG:
             break
         }
+        discardLocationIfUnused(saveURL)
+    }
+
+    /// After an export that saved nothing, lets the save location remove a folder it made for it.
+    private func discardLocationIfUnused(_ location: URL) {
+        guard state.exportAlert?.isSuccess != true else { return }
+        saveLocationProvider.discardIfUnused(location)
     }
 
     // MARK: - Page export
@@ -768,6 +775,7 @@ final class BeaverReactor: AsyncReactor {
             await runExport(format == .pdf ? .exportingPages : .exportingImages) {
                 await exportService.exportPages(source, as: format, to: destination).noting(skipped: skipped)
             }
+            discardLocationIfUnused(destination)
             return
         }
 
@@ -785,13 +793,7 @@ final class BeaverReactor: AsyncReactor {
         await runExport(.exportingImages) {
             await exportService.exportPageImages(sources, as: format, into: directory).noting(skipped: skipped)
         }
-
-        #if os(iOS)
-        // iOS made this folder for the export; don't leave it behind empty.
-        if state.exportAlert?.isSuccess != true {
-            Self.removeIfEmpty(directory)
-        }
-        #endif
+        discardLocationIfUnused(directory)
     }
 
     @concurrent
@@ -801,15 +803,6 @@ final class BeaverReactor: AsyncReactor {
             Result { () throws(PageExportError) in try exporter.pageCount(of: source) }
         }
     }
-
-    #if os(iOS)
-    private static func removeIfEmpty(_ directory: URL) {
-        let contents = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-        if contents.isEmpty {
-            try? FileManager.default.removeItem(at: directory)
-        }
-    }
-    #endif
 
     private func split(_ sources: [ExportSource], into directory: URL) async {
         guard !sources.isEmpty, state.activity == nil else { return }

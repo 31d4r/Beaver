@@ -16,9 +16,15 @@ protocol SaveLocationProviding {
     /// with an open panel, as Split does; iOS makes a new folder named `defaultName` in Beaver's
     /// Documents folder.
     func folderLocation(defaultName: String, prompt: String) -> URL?
+    /// Called after an export that saved nothing (it failed or was cancelled) with the location
+    /// it was given, so a folder made just for it doesn't stay behind empty.
+    func discardIfUnused(_ location: URL)
 }
 
 extension SaveLocationProviding {
+    /// The Mac's panels make no folders of their own, so there is nothing to remove.
+    func discardIfUnused(_ location: URL) {}
+
     /// Where to save one new PDF.
     func saveLocation(defaultName: String, prompt: String) -> URL? {
         saveLocation(defaultName: defaultName, prompt: prompt, contentType: .pdf)
@@ -26,8 +32,20 @@ extension SaveLocationProviding {
 }
 
 #if os(macOS)
-/// The save location each platform uses by default.
+/// The save location each platform uses by default. On iOS each export gets its own folder.
 typealias PlatformSaveLocationService = SavePanelService
 #else
 typealias PlatformSaveLocationService = DocumentsSaveLocationService
 #endif
+
+extension PlatformSaveLocationService {
+    /// Where finished scans go: the save panel on the Mac, and straight into Beaver's
+    /// Documents folder on iOS, without an export folder.
+    static func forScans() -> PlatformSaveLocationService {
+        #if os(macOS)
+        SavePanelService()
+        #else
+        DocumentsSaveLocationService(groupsIntoExportFolders: false)
+        #endif
+    }
+}
