@@ -31,6 +31,8 @@ struct ExportCancellationTests {
         #expect(reactor.state.activity == nil)
         #expect(reactor.state.exportAlert == nil)
         #expect(reactor.state.canEdit)
+        // Nothing was saved, so the save location may remove the folder it made for it.
+        #expect(panels.discardedLocations == [panels.saveURL])
     }
 
     @Test func cancelAfterTheFileIsWrittenKeepsItAndShowsTheSavedBanner() async {
@@ -55,6 +57,7 @@ struct ExportCancellationTests {
         #expect(reactor.state.exportAlert == saved)
         #expect(reactor.state.exportAlert?.output == destination)
         #expect(reactor.state.canEdit)
+        #expect(panels.discardedLocations.isEmpty)
     }
 
     @Test func cancelThenFailureShowsNoError() async {

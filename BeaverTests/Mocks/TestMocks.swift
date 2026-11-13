@@ -21,6 +21,12 @@ final class MockSaveLocationProvider: SaveLocationProviding {
         requestedFolderNames.append(defaultName)
         return folderURL
     }
+
+    private(set) var discardedLocations: [URL] = []
+
+    func discardIfUnused(_ location: URL) {
+        discardedLocations.append(location)
+    }
 }
 
 // Tests drive this mock from one task at a time.

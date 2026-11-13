@@ -90,7 +90,7 @@ final class ScanReactor: AsyncReactor {
 
     init(
         builder: ScanDocumentBuilder = ScanDocumentBuilder(),
-        saveLocationProvider: SaveLocationProviding = PlatformSaveLocationService(),
+        saveLocationProvider: SaveLocationProviding = PlatformSaveLocationService.forScans(),
         date: Date = .now,
         writePDF: PDFWriter? = nil
     ) {
