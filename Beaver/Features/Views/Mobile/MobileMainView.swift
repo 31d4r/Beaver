@@ -120,15 +120,17 @@ struct MobileMainView: View {
         .fileImporter(
             isPresented: $isFileImporterPresented,
             allowedContentTypes: state.fileImport?.allowedContentTypes ?? [],
-            allowsMultipleSelection: state.fileImport?.allowsMultipleSelection ?? false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                reactor.send(.didImportFiles(urls))
-            case .failure(let error):
-                reactor.send(.didFailFileImport(error.localizedDescription))
-            }
-        }
+            allowsMultipleSelection: state.fileImport?.allowsMultipleSelection ?? false,
+            onCompletion: { result in
+                switch result {
+                case .success(let urls):
+                    reactor.send(.didImportFiles(urls))
+                case .failure(let error):
+                    reactor.send(.didFailFileImport(error.localizedDescription))
+                }
+            },
+            onCancellation: { reactor.action(.didCancelFileImport) }
+        )
         .modifier(FileDialogConfirmationLabel(label: state.fileImport?.confirmationLabel))
         .focusedSceneObject(reactor)
         .task {

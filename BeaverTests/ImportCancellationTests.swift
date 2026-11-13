@@ -97,6 +97,100 @@ struct ImportCancellationTests {
         #expect(reactor.state.items.map(\.url) == [TestFixtures.samplePNG])
     }
 
+    @Test func filesAreReadOffTheMainActorWhileItStaysResponsive() async {
+        let reactor = makeReactor()
+        images.holdsUntilReleased = true
+
+        let running = Task { await reactor.action(.addFiles([TestFixtures.samplePNG])) }
+        // This loop only runs if the main actor is free while the image is being read.
+        while images.thumbnailCallsOnMainThread.isEmpty {
+            await Task.yield()
+        }
+        #expect(reactor.state.activity == .importing)
+        #expect(reactor.state.items.isEmpty)
+        images.releaseThumbnails()
+        await running.value
+
+        #expect(images.thumbnailCallsOnMainThread == [false])
+        #expect(reactor.state.items.map(\.url) == [TestFixtures.samplePNG])
+        #expect(reactor.state.activity == nil)
+    }
+
+    @Test func pdfPreviewsArePreparedBeforeTheCardsAppear() async {
+        let reactor = makeReactor()
+
+        await reactor.action(.addFiles([TestFixtures.sample2PDF]))
+
+        #expect(reactor.state.items.map(\.url) == [TestFixtures.sample2PDF])
+        #expect(await Previews.cache.contains(TestFixtures.sample2PDF))
+    }
+
+    // MARK: - File importer
+
+    @Test func closingTheImporterShowsBusyUntilItsFilesArrive() async {
+        let reactor = makeReactor()
+        await reactor.action(.chooseFiles)
+
+        reactor.action(.didChangeFileImporterPresented(false))
+        #expect(reactor.state.activity == .importing)
+        #expect(reactor.state.isAwaitingImportedFiles)
+
+        await reactor.action(.didImportFiles([TestFixtures.samplePDF, TestFixtures.samplePNG]))
+
+        #expect(reactor.state.items.count == 2)
+        #expect(reactor.state.activity == nil)
+        #expect(!reactor.state.isAwaitingImportedFiles)
+    }
+
+    @Test func filesThatArriveBeforeTheImporterClosesStillAdd() async {
+        let reactor = makeReactor()
+        await reactor.action(.chooseFiles)
+
+        await reactor.action(.didImportFiles([TestFixtures.samplePDF]))
+        reactor.action(.didChangeFileImporterPresented(false))
+
+        #expect(reactor.state.items.count == 1)
+        #expect(reactor.state.activity == nil)
+    }
+
+    @Test func cancellingThePickerEndsTheBusyState() async {
+        let reactor = makeReactor()
+        await reactor.action(.chooseFiles)
+
+        reactor.action(.didChangeFileImporterPresented(false))
+        reactor.action(.didCancelFileImport)
+
+        #expect(reactor.state.activity == nil)
+        #expect(reactor.state.fileImport == nil)
+        #expect(reactor.state.canEdit)
+    }
+
+    @Test func cancelWhileWaitingIgnoresFilesThatArriveLater() async {
+        let reactor = makeReactor()
+        await reactor.action(.chooseFiles)
+        reactor.action(.didChangeFileImporterPresented(false))
+
+        reactor.action(.cancelExport)
+        #expect(reactor.state.activity == nil)
+        await reactor.action(.didImportFiles([TestFixtures.samplePDF]))
+
+        #expect(reactor.state.items.isEmpty)
+        #expect(reactor.state.exportAlert == nil)
+        #expect(reactor.state.canEdit)
+    }
+
+    @Test func choosingASplitFolderDoesNotShowTheImport() async {
+        let reactor = makeReactor()
+        await reactor.action(.addFiles([TestFixtures.samplePDF]))
+        await reactor.action(.perform(.split))
+        #expect(reactor.state.fileImport != nil)
+
+        reactor.action(.didChangeFileImporterPresented(false))
+
+        #expect(reactor.state.activity == nil)
+        reactor.action(.didCancelFileImport)
+    }
+
     @Test func storageDiscardLeavesFilesOutsideItAlone() throws {
         let outside = FileManager.default.temporaryDirectory
             .appendingPathComponent("ImportCancellationTests-\(UUID().uuidString)", isDirectory: true)

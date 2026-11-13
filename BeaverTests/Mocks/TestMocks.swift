@@ -56,11 +56,25 @@ final class MockImageService: ImageServiceProtocol, @unchecked Sendable {
 
     /// Holds each thumbnail until the asking task is cancelled (at most 5 s), like a slow file.
     var blocksUntilCancelled = false
+    /// Holds each thumbnail until `releaseThumbnails()` or cancellation (at most 5 s).
+    var holdsUntilReleased = false
+    private let threadLock = NSLock()
+    private var released = false
+    private var mainThreadFlags: [Bool] = []
+
+    /// Whether each thumbnail was read on the main thread, in call order.
+    var thumbnailCallsOnMainThread: [Bool] { threadLock.withLock { mainThreadFlags } }
+
+    func releaseThumbnails() {
+        threadLock.withLock { released = true }
+    }
 
     func thumbnail(for url: URL, maxPixelSize: Int) -> CGImage? {
-        if blocksUntilCancelled {
+        threadLock.withLock { mainThreadFlags.append(Thread.isMainThread) }
+        if blocksUntilCancelled || holdsUntilReleased {
             let deadline = Date().addingTimeInterval(5)
             while !Task.isCancelled && Date() < deadline {
+                if holdsUntilReleased && threadLock.withLock({ released }) { break }
                 Thread.sleep(forTimeInterval: 0.001)
             }
         }
