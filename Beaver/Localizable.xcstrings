@@ -25103,6 +25103,138 @@
         }
       },
       "comment": "iOS: accessibility hint for Share after saving pages as images"
+    },
+    "progress.cancel.hint": {
+      "comment": "Accessibility hint for Cancel on the progress card",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stops the work in progress"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beendet den laufenden Vorgang"
+          }
+        },
+        "bs": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zaustavlja posao u toku"
+          }
+        },
+        "hr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zaustavlja posao u tijeku"
+          }
+        },
+        "sr-Latn": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zaustavlja posao u toku"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detiene la tarea en curso"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrompe a tarefa em andamento"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Останавливает текущую операцию"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止正在进行的操作"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrête l’opération en cours"
+          }
+        }
+      }
+    },
+    "progress.cancelled": {
+      "comment": "VoiceOver announcement after Cancel on the progress card",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelled"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abgebrochen"
+          }
+        },
+        "bs": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otkazano"
+          }
+        },
+        "hr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otkazano"
+          }
+        },
+        "sr-Latn": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otkazano"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelado"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelado"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отменено"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已取消"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annulé"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
