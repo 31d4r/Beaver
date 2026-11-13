@@ -16,7 +16,8 @@ struct ExportCancellationTests {
     @Test func cancelStopsTheExportAndShowsNothing() async {
         let panels = MockSaveLocationProvider()
         panels.saveURL = URL(fileURLWithPath: "/tmp/beaver-tests/merged.pdf")
-        let export = MockExportService(result: ExportAlert(message: "merged", isSuccess: true), isGated: true)
+        // The service honours Cancel before writing, as the real one does.
+        let export = MockExportService(result: .cancelled, isGated: true)
         let reactor = BeaverReactor(saveLocationProvider: panels, imageService: MockImageService(), exportService: export)
         await reactor.action(.addFiles([TestFixtures.samplePDF, TestFixtures.sample2PDF]))
 
@@ -28,6 +29,49 @@ struct ExportCancellationTests {
         await running.value
 
         #expect(reactor.state.activity == nil)
+        #expect(reactor.state.exportAlert == nil)
+        #expect(reactor.state.canEdit)
+    }
+
+    @Test func cancelAfterTheFileIsWrittenKeepsItAndShowsTheSavedBanner() async {
+        let panels = MockSaveLocationProvider()
+        let destination = URL(fileURLWithPath: "/tmp/beaver-tests/merged.pdf")
+        panels.saveURL = destination
+        // Cancel lands while the service is already writing, so it still reports the saved file.
+        let saved = ExportAlert(message: "merged", isSuccess: true, output: destination)
+        let export = MockExportService(result: saved, isGated: true)
+        let reactor = BeaverReactor(saveLocationProvider: panels, imageService: MockImageService(), exportService: export)
+        await reactor.action(.addFiles([TestFixtures.samplePDF, TestFixtures.sample2PDF]))
+
+        let running = Task { await reactor.exportOneFile() }
+        while reactor.state.activity == nil {
+            await Task.yield()
+        }
+        reactor.action(.cancelExport)
+        export.release()
+        await running.value
+
+        #expect(reactor.state.activity == nil)
+        #expect(reactor.state.exportAlert == saved)
+        #expect(reactor.state.exportAlert?.output == destination)
+        #expect(reactor.state.canEdit)
+    }
+
+    @Test func cancelThenFailureShowsNoError() async {
+        let panels = MockSaveLocationProvider()
+        panels.saveURL = URL(fileURLWithPath: "/tmp/beaver-tests/merged.pdf")
+        let export = MockExportService(result: ExportAlert(message: "failed", isSuccess: false), isGated: true)
+        let reactor = BeaverReactor(saveLocationProvider: panels, imageService: MockImageService(), exportService: export)
+        await reactor.action(.addFiles([TestFixtures.samplePDF, TestFixtures.sample2PDF]))
+
+        let running = Task { await reactor.exportOneFile() }
+        while reactor.state.activity == nil {
+            await Task.yield()
+        }
+        reactor.action(.cancelExport)
+        export.release()
+        await running.value
+
         #expect(reactor.state.exportAlert == nil)
         #expect(reactor.state.canEdit)
     }

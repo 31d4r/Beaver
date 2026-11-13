@@ -46,7 +46,8 @@ final class BeaverReactor: AsyncReactor {
         /// Replaces the PDFs in the list (images stay), e.g. for previews and tests.
         case setPDFs([PDFItem])
         case didDismissAlert
-        /// Stops the running export. Nothing is saved unless writing had already begun.
+        /// Stops the running export. Nothing is saved unless writing had already begun; a file
+        /// written before Cancel took effect is kept and gets the usual saved banner.
         case cancelExport
         case didCancelRemoveAll
         case didChangeFileImporterPresented(Bool)
@@ -552,6 +553,8 @@ final class BeaverReactor: AsyncReactor {
     // MARK: - Export
 
     /// Runs `work` off the main actor with `activity` shown, then presents its result.
+    /// After Cancel, a failure or `.cancelled` shows nothing, but a success means the output
+    /// was already written before Cancel took effect, so it is kept and reported as saved.
     private func runExport(
         _ activity: Activity,
         _ work: @escaping @Sendable () async -> ExportAlert
@@ -563,7 +566,7 @@ final class BeaverReactor: AsyncReactor {
         let alert = await task.value
         exportTask = nil
         state.activity = nil
-        state.exportAlert = task.isCancelled ? nil : alert
+        state.exportAlert = task.isCancelled && !alert.isSuccess ? nil : alert
     }
 
     private func perform(_ action: DocumentAction, ids: Set<UUID>?) async {
