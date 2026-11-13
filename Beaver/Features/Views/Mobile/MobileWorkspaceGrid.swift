@@ -66,6 +66,7 @@ struct MobileWorkspaceGrid: View {
             cornerRadius: DesignSystem.Layout.selectionRadius,
             isEnabled: reactor.state.canEdit,
             actions: cardActions.leading,
+            shareURLs: cardActions.shareURLs,
             trailingActions: cardActions.trailing,
             onMove: { id, destination in reactor.action(.move(id: id, to: destination)) }
         )

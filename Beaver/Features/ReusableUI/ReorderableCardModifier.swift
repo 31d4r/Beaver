@@ -48,6 +48,8 @@ struct ReorderableCardModifier: ViewModifier {
     let isEnabled: Bool
     /// Shown before the move items.
     var actions: [CardAction] = []
+    /// Files the context menu's Share item sends, in their own group after `actions`; no Share item when empty.
+    var shareURLs: [URL] = []
     /// Shown after the move items, such as Remove.
     var trailingActions: [CardAction] = []
     /// Moves the item with the given id to the given index.
@@ -80,7 +82,15 @@ struct ReorderableCardModifier: ViewModifier {
             }
             .contextMenu {
                 menuButtons(actions)
-                if !actions.isEmpty { Divider() }
+                if !shareURLs.isEmpty {
+                    Divider()
+                    ShareLink(items: shareURLs) {
+                        Label(DesignSystem.Mobile.share, systemImage: DesignSystem.Icons.share)
+                    }
+                    .help(DesignSystem.Mobile.shareHelp)
+                    .accessibilityHint(DesignSystem.Mobile.shareHelp)
+                }
+                if !actions.isEmpty || !shareURLs.isEmpty { Divider() }
                 ForEach(MoveDirection.allCases, id: \.self) { direction in
                     Button(Self.label(for: direction)) {
                         moveSelf(direction)
@@ -162,6 +172,7 @@ extension View {
         cornerRadius: CGFloat,
         isEnabled: Bool,
         actions: [CardAction] = [],
+        shareURLs: [URL] = [],
         trailingActions: [CardAction] = [],
         onMove: @escaping (UUID, Int) -> Void
     ) -> some View {
@@ -174,6 +185,7 @@ extension View {
             cornerRadius: cornerRadius,
             isEnabled: isEnabled,
             actions: actions,
+            shareURLs: shareURLs,
             trailingActions: trailingActions,
             onMove: onMove
         ))
